@@ -1,4 +1,4 @@
-# FreezeBot (Storacha Twitter Bot)
+# FreezeBot
 
 **FreezeBot** preserves X (Twitter) content permanently on decentralized storage.
 When posts disappear, Freeze remembers.
