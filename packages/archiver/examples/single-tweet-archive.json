@@ -1,0 +1,68 @@
+{
+  "schema": "freeze/v1",
+  "source": {
+    "platform": "x",
+    "tweetId": "1898770012345678901",
+    "archivedAt": "2026-03-08T18:41:12.000Z",
+    "mode": "single"
+  },
+  "tweet": {
+    "metadata": {
+      "id": "1898770012345678901",
+      "createdAt": "2026-03-08T18:38:54.000Z",
+      "conversationId": "1898770012345678901",
+      "lang": "en",
+      "references": [
+        {
+          "id": "1898768888000000000",
+          "type": "quoted"
+        }
+      ]
+    },
+    "author": {
+      "id": "99887766",
+      "handle": "freezeuser",
+      "displayName": "Freeze User",
+      "verified": false
+    },
+    "content": {
+      "text": "Check this out @Freeze #archive",
+      "entities": {
+        "urls": [
+          {
+            "shortUrl": "https://t.co/abc123",
+            "expandedUrl": "https://example.com/reference",
+            "displayUrl": "example.com/reference",
+            "title": "Reference Article"
+          }
+        ],
+        "mentions": [
+          {
+            "handle": "Freeze",
+            "id": "44556677"
+          }
+        ],
+        "hashtags": [
+          {
+            "tag": "archive"
+          }
+        ],
+        "cashtags": []
+      }
+    },
+    "media": [
+      {
+        "mediaKey": "3_555123123123",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/example.jpg",
+        "width": 1280,
+        "height": 720,
+        "altText": "Example attached image"
+      }
+    ]
+  },
+  "rawSnapshot": {
+    "provider": "x-api-v2",
+    "collectedAt": "2026-03-08T18:41:12.000Z"
+  }
+}
