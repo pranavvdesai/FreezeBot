@@ -23,6 +23,24 @@ export type NormalizedTweet = {
   conversationId: string;
   referencedTweets: ReferencedTweet[];
   media: MediaMetadata[];
+  entities?: {
+    urls?: Array<{
+      url: string;
+      expanded_url?: string;
+      display_url?: string;
+      title?: string;
+    }>;
+    mentions?: Array<{
+      username: string;
+      id?: string;
+    }>;
+    hashtags?: Array<{
+      tag: string;
+    }>;
+    cashtags?: Array<{
+      tag: string;
+    }>;
+  };
 };
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -37,6 +55,24 @@ type XTweetResponse = {
     referenced_tweets?: Array<{ id?: string; type?: string }>;
     attachments?: {
       media_keys?: string[];
+    };
+    entities?: {
+      urls?: Array<{
+        url: string;
+        expanded_url?: string;
+        display_url?: string;
+        title?: string;
+      }>;
+      mentions?: Array<{
+        username: string;
+        id?: string;
+      }>;
+      hashtags?: Array<{
+        tag: string;
+      }>;
+      cashtags?: Array<{
+        tag: string;
+      }>;
     };
   };
   includes?: {
@@ -93,7 +129,7 @@ export async function fetchTargetTweet(
   const baseUrl = (options?.baseUrl ?? 'https://api.x.com').replace(/\/$/, '');
   const params = new URLSearchParams({
     expansions: 'author_id,attachments.media_keys',
-    'tweet.fields': 'created_at,conversation_id,author_id,referenced_tweets,text,attachments',
+    'tweet.fields': 'created_at,conversation_id,author_id,referenced_tweets,text,attachments,entities',
     'user.fields': 'username',
     'media.fields': 'media_key,type,url,preview_image_url,width,height,duration_ms,alt_text'
   });
@@ -182,6 +218,7 @@ function normalizeTweet(payload: XTweetResponse): NormalizedTweet {
     createdAt: data.created_at,
     conversationId: data.conversation_id,
     referencedTweets,
-    media
+    media,
+    entities: data.entities
   };
 }

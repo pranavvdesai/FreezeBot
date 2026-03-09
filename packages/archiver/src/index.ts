@@ -17,3 +17,10 @@ export {
   type TweetReference,
   type UrlEntity
 } from './archive-schema';
+
+export {
+  buildSingleTweetBundle,
+  type BundleBuilderInput,
+  type MediaManifest,
+  type TweetBundle
+} from './bundle-builder';
