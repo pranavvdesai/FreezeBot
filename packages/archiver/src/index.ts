@@ -17,7 +17,6 @@ export {
   type TweetReference,
   type UrlEntity
 } from './archive-schema';
-
 export {
   buildSingleTweetBundle,
   type BundleBuilderInput,
