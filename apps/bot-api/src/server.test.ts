@@ -10,14 +10,16 @@ function signedHeader(body: unknown) {
   return `sha256=${computeSignature(rawBody, secret)}`;
 }
 
-describe('webhook reply flow', () => {
-  it('triggers postReply for valid mention command', async () => {
+describe('webhook archive flow', () => {
+  it('archives a single tweet and replies with the CID', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
-    const app = createApp({ postReplyFn });
+    const archiveSingleTweetFn = vi.fn().mockResolvedValue({ cid: 'bafyarchivecid' });
+    const app = createApp({ postReplyFn, archiveSingleTweetFn });
 
     const payload = {
-      tweetId: '12345',
+      mentionTweetId: 'mention-123',
+      targetTweetId: 'target-456',
       text: '@Freeze this'
     };
 
@@ -28,20 +30,27 @@ describe('webhook reply flow', () => {
       .send(payload);
 
     expect(response.status).toBe(200);
+    expect(archiveSingleTweetFn).toHaveBeenCalledWith({
+      mentionTweetId: 'mention-123',
+      targetTweetId: 'target-456'
+    });
     expect(postReplyFn).toHaveBeenCalledWith(
-      '12345',
-      'FreezeBot is working\nCommand received: archive (single)'
+      'mention-123',
+      'Archived successfully ✅\nCID: bafyarchivecid'
     );
+    expect(response.body.cid).toBe('bafyarchivecid');
   });
 
   it('returns 401 for invalid signature', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
-    const app = createApp({ postReplyFn });
+    const archiveSingleTweetFn = vi.fn().mockResolvedValue({ cid: 'bafyarchivecid' });
+    const app = createApp({ postReplyFn, archiveSingleTweetFn });
 
     const payload = {
-      tweetId: '12345',
-      text: '@Freeze status'
+      mentionTweetId: 'mention-123',
+      targetTweetId: 'target-456',
+      text: '@Freeze this'
     };
 
     const response = await request(app)
@@ -52,17 +61,20 @@ describe('webhook reply flow', () => {
 
     expect(response.status).toBe(401);
     expect(postReplyFn).not.toHaveBeenCalled();
+    expect(archiveSingleTweetFn).not.toHaveBeenCalled();
   });
 
-  it('logs and returns 500 when posting reply fails', async () => {
+  it('posts a friendly error reply when archive flow fails', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const logger = { error: vi.fn() };
-    const postReplyFn = vi.fn().mockRejectedValue(new Error('network failed'));
-    const app = createApp({ postReplyFn, logger });
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const archiveSingleTweetFn = vi.fn().mockRejectedValue(new Error('upload failed'));
+    const app = createApp({ postReplyFn, archiveSingleTweetFn, logger });
 
     const payload = {
-      tweetId: '555',
-      text: '@Freeze recover'
+      mentionTweetId: 'mention-555',
+      targetTweetId: 'target-999',
+      text: '@Freeze this'
     };
 
     const response = await request(app)
@@ -71,7 +83,35 @@ describe('webhook reply flow', () => {
       .set('x-twitter-webhooks-signature', signedHeader(payload))
       .send(payload);
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(200);
     expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-555',
+      "Sorry, I couldn't archive that tweet right now. Please try again."
+    );
+    expect(response.body.ok).toBe(false);
+  });
+
+  it('keeps placeholder replies for non-archive commands', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const app = createApp({ postReplyFn });
+
+    const payload = {
+      mentionTweetId: 'mention-123',
+      text: '@Freeze status'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-123',
+      'FreezeBot is working\nCommand received: status (single)'
+    );
   });
 });
