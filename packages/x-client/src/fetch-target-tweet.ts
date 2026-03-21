@@ -43,7 +43,7 @@ export type NormalizedTweet = {
   };
 };
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 type XTweetResponse = {
   data?: {
@@ -103,13 +103,15 @@ export class XClientError extends Error {
   }
 }
 
+export type XClientOptions = {
+  bearerToken?: string;
+  baseUrl?: string;
+  fetchFn?: FetchLike;
+};
+
 export async function fetchTargetTweet(
   targetTweetId: string,
-  options?: {
-    bearerToken?: string;
-    baseUrl?: string;
-    fetchFn?: FetchLike;
-  }
+  options?: XClientOptions
 ): Promise<NormalizedTweet> {
   const tweetId = targetTweetId.trim();
   if (!tweetId) {
@@ -168,7 +170,7 @@ async function safeReadText(response: Response) {
   }
 }
 
-function normalizeTweet(payload: XTweetResponse): NormalizedTweet {
+export function normalizeTweet(payload: XTweetResponse): NormalizedTweet {
   const data = payload.data;
   if (!data?.id || !data?.text || !data?.created_at || !data?.conversation_id) {
     throw new XClientError('X API response is missing required tweet fields');

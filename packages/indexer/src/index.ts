@@ -5,7 +5,7 @@ export type ArchiveRecord = {
   archivedAt: string;
   platform: 'x';
   command: 'archive';
-  mode: 'single';
+  mode: 'single' | 'thread';
   archiveMetadata: unknown;
 };
 

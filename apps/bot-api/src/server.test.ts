@@ -41,6 +41,36 @@ describe('webhook archive flow', () => {
     expect(response.body.cid).toBe('bafyarchivecid');
   });
 
+  it('archives a thread and replies with the CID', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const archiveThreadFn = vi.fn().mockResolvedValue({ cid: 'bafythreadcid' });
+    const app = createApp({ postReplyFn, archiveThreadFn });
+
+    const payload = {
+      mentionTweetId: 'mention-777',
+      targetTweetId: 'target-888',
+      text: '@Freeze this thread'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(archiveThreadFn).toHaveBeenCalledWith({
+      mentionTweetId: 'mention-777',
+      targetTweetId: 'target-888'
+    });
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-777',
+      'Archived successfully ✅\nCID: bafythreadcid'
+    );
+    expect(response.body.cid).toBe('bafythreadcid');
+  });
+
   it('returns 401 for invalid signature', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
@@ -87,6 +117,34 @@ describe('webhook archive flow', () => {
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(postReplyFn).toHaveBeenCalledWith(
       'mention-555',
+      "Sorry, I couldn't archive that tweet right now. Please try again."
+    );
+    expect(response.body.ok).toBe(false);
+  });
+
+  it('posts a friendly error reply when thread archive fails', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const logger = { error: vi.fn() };
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const archiveThreadFn = vi.fn().mockRejectedValue(new Error('thread fetch failed'));
+    const app = createApp({ postReplyFn, archiveThreadFn, logger });
+
+    const payload = {
+      mentionTweetId: 'mention-901',
+      targetTweetId: 'target-999',
+      text: '@Freeze this thread'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-901',
       "Sorry, I couldn't archive that tweet right now. Please try again."
     );
     expect(response.body.ok).toBe(false);

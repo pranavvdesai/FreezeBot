@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSingleTweetBundle, BundleBuilderInput } from './bundle-builder';
+import { buildSingleTweetBundle, buildThreadBundle, BundleBuilderInput } from './bundle-builder';
 
 describe('BundleBuilder', () => {
   const mockInput: BundleBuilderInput = {
@@ -68,5 +68,41 @@ describe('BundleBuilder', () => {
     expect(bundle['bundle.json']).toBeDefined();
     expect(bundle['raw.json']).toBeUndefined();
     expect(bundle['media-manifest.json']).toBeUndefined();
+  });
+
+  it('builds a thread bundle with ordered tweet records', () => {
+    const threadBundle = buildThreadBundle(
+      {
+        targetTweetId: '12346',
+        tweets: [
+          {
+            tweetId: '12345',
+            authorId: '6789',
+            authorHandle: 'test_user',
+            text: 'Thread start',
+            createdAt: '2026-03-09T10:00:00Z',
+            conversationId: '12345',
+            referencedTweets: [],
+            media: []
+          },
+          {
+            tweetId: '12346',
+            authorId: '6789',
+            authorHandle: 'test_user',
+            text: 'Thread second',
+            createdAt: '2026-03-09T10:01:00Z',
+            conversationId: '12345',
+            referencedTweets: [{ id: '12345', type: 'replied_to' }],
+            media: []
+          }
+        ]
+      },
+      { archivedAt: '2026-03-09T12:00:00Z' }
+    );
+
+    expect(threadBundle['bundle.json'].source.mode).toBe('thread');
+    expect(threadBundle['bundle.json'].thread?.rootTweetId).toBe('12345');
+    expect(threadBundle['bundle.json'].thread?.tweets).toHaveLength(2);
+    expect(threadBundle['bundle.json'].tweet.metadata.id).toBe('12346');
   });
 });
