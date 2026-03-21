@@ -73,6 +73,11 @@ export type ArchivedTweetRecord = {
   media: MediaReference[];
 };
 
+export type ArchivedThreadRecord = {
+  rootTweetId: string;
+  tweets: ArchivedTweetRecord[];
+};
+
 export type ArchiveSource = {
   platform: SourcePlatform;
   tweetId: string;
@@ -84,6 +89,7 @@ export type ArchivedTweetDocumentV1 = {
   schema: FreezeArchiveSchemaVersion;
   source: ArchiveSource;
   tweet: ArchivedTweetRecord;
+  thread?: ArchivedThreadRecord;
   // Optional raw snapshot from X API response for audits and debugging.
   rawSnapshot?: unknown;
   // Reserved for future migration to multi-tweet/thread archives.

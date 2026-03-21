@@ -2,6 +2,7 @@ export {
   FREEZE_ARCHIVE_SCHEMA_V1,
   X_PLATFORM,
   type ArchiveContentMode,
+  type ArchivedThreadRecord,
   type ArchivedTweetDocumentV1,
   type ArchivedTweetRecord,
   type ArchiveSource,
@@ -19,7 +20,9 @@ export {
 } from './archive-schema';
 export {
   buildSingleTweetBundle,
+  buildThreadBundle,
   type BundleBuilderInput,
   type MediaManifest,
+  type ThreadBundleBuilderInput,
   type TweetBundle
 } from './bundle-builder';

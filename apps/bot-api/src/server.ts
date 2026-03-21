@@ -3,6 +3,7 @@ import { verifyRequestSignature } from './signature';
 import { ParsedCommand, parseCommand } from './command-parser';
 import { postReply } from './post-reply';
 import { archiveSingleTweet } from './archive-single-tweet';
+import { archiveThread } from './archive-thread';
 
 type RawBodyRequest = Request & { rawBody?: Buffer };
 type Logger = Pick<Console, 'error'>;
@@ -10,6 +11,10 @@ type Logger = Pick<Console, 'error'>;
 type CreateAppOptions = {
   postReplyFn?: (tweetId: string, message: string) => Promise<void>;
   archiveSingleTweetFn?: (input: {
+    mentionTweetId: string;
+    targetTweetId: string;
+  }) => Promise<{ cid: string }>;
+  archiveThreadFn?: (input: {
     mentionTweetId: string;
     targetTweetId: string;
   }) => Promise<{ cid: string }>;
@@ -104,6 +109,7 @@ export function createApp(options: CreateAppOptions = {}) {
   const app = express();
   const postReplyFn = options.postReplyFn ?? postReply;
   const archiveSingleTweetFn = options.archiveSingleTweetFn ?? archiveSingleTweet;
+  const archiveThreadFn = options.archiveThreadFn ?? archiveThread;
   const logger = options.logger ?? console;
 
   app.use(
@@ -178,6 +184,39 @@ export function createApp(options: CreateAppOptions = {}) {
           await postReplyFn(mentionTweetId, buildArchiveFailureMessage());
         } catch (replyError) {
           logger.error('Failed to post archive failure reply', {
+            error: replyError,
+            mentionTweetId,
+            targetTweetId
+          });
+          res.status(500).json({ error: 'failed to post reply' });
+          return;
+        }
+
+        res.json({ ok: false, error: 'archive failed', repliedTo: mentionTweetId });
+        return;
+      }
+    }
+
+    if (command.command === 'archive' && command.mode === 'thread') {
+      try {
+        const archiveResult = await archiveThreadFn({
+          mentionTweetId,
+          targetTweetId: targetTweetId ?? mentionTweetId
+        });
+        await postReplyFn(mentionTweetId, buildArchiveSuccessMessage(archiveResult.cid));
+        res.json({ ok: true, command, cid: archiveResult.cid, repliedTo: mentionTweetId });
+        return;
+      } catch (error) {
+        logger.error('Failed to archive thread', {
+          error,
+          mentionTweetId,
+          targetTweetId
+        });
+
+        try {
+          await postReplyFn(mentionTweetId, buildArchiveFailureMessage());
+        } catch (replyError) {
+          logger.error('Failed to post thread archive failure reply', {
             error: replyError,
             mentionTweetId,
             targetTweetId

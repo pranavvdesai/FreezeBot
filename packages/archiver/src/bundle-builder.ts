@@ -3,6 +3,7 @@ import {
   FREEZE_ARCHIVE_SCHEMA_V1,
   X_PLATFORM,
   ArchivedTweetRecord,
+  ArchivedThreadRecord,
   TextEntities
 } from './archive-schema';
 
@@ -66,52 +67,7 @@ export function buildSingleTweetBundle(
   } = {}
 ): TweetBundle {
   const archivedAt = options.archivedAt ?? new Date().toISOString();
-
-  const entities: TextEntities = {
-    urls: (input.entities?.urls ?? []).map((u) => ({
-      shortUrl: u.url,
-      expandedUrl: u.expanded_url,
-      displayUrl: u.display_url,
-      title: u.title
-    })),
-    mentions: (input.entities?.mentions ?? []).map((m) => ({
-      handle: m.username,
-      id: m.id
-    })),
-    hashtags: (input.entities?.hashtags ?? []).map((h) => ({
-      tag: h.tag
-    })),
-    cashtags: (input.entities?.cashtags ?? []).map((c) => ({
-      tag: c.tag
-    }))
-  };
-
-  const tweetRecord: ArchivedTweetRecord = {
-    metadata: {
-      id: input.tweetId,
-      createdAt: input.createdAt,
-      conversationId: input.conversationId,
-      references: input.referencedTweets
-    },
-    author: {
-      id: input.authorId,
-      handle: input.authorHandle
-    },
-    content: {
-      text: input.text,
-      entities
-    },
-    media: input.media.map((m) => ({
-      mediaKey: m.mediaKey,
-      type: m.type,
-      url: m.url,
-      previewImageUrl: m.previewImageUrl,
-      width: m.width,
-      height: m.height,
-      durationMs: m.durationMs,
-      altText: m.altText
-    }))
-  };
+  const tweetRecord = mapTweetRecord(input);
 
   const bundle: ArchivedTweetDocumentV1 = {
     schema: FREEZE_ARCHIVE_SCHEMA_V1,
@@ -145,6 +101,127 @@ export function buildSingleTweetBundle(
   }
 
   return result;
+}
+
+export type ThreadBundleBuilderInput = {
+  targetTweetId: string;
+  tweets: BundleBuilderInput[];
+};
+
+export function buildThreadBundle(
+  input: ThreadBundleBuilderInput,
+  options: {
+    rawSnapshot?: unknown;
+    archivedAt?: string;
+  } = {}
+): TweetBundle {
+  if (input.tweets.length === 0) {
+    throw new Error('Thread bundle requires at least one tweet');
+  }
+
+  const archivedAt = options.archivedAt ?? new Date().toISOString();
+  const sortedTweets = [...input.tweets].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt)
+  );
+  const tweetRecords = sortedTweets.map(mapTweetRecord);
+  const targetTweetRecord =
+    tweetRecords.find((tweet) => tweet.metadata.id === input.targetTweetId) ?? tweetRecords[0];
+  const threadRecord: ArchivedThreadRecord = {
+    rootTweetId: tweetRecords[0].metadata.id,
+    tweets: tweetRecords
+  };
+
+  const bundle: ArchivedTweetDocumentV1 = {
+    schema: FREEZE_ARCHIVE_SCHEMA_V1,
+    source: {
+      platform: X_PLATFORM,
+      tweetId: input.targetTweetId,
+      archivedAt,
+      mode: 'thread'
+    },
+    tweet: targetTweetRecord,
+    thread: threadRecord,
+    rawSnapshot: options.rawSnapshot
+  };
+
+  const result: TweetBundle = {
+    'bundle.json': bundle
+  };
+
+  if (options.rawSnapshot) {
+    result['raw.json'] = options.rawSnapshot;
+  }
+
+  const media = input.tweets.flatMap((tweet) => tweet.media);
+  if (media.length > 0) {
+    result['media-manifest.json'] = {
+      media: dedupeMedia(media).map((item) => ({
+        mediaKey: item.mediaKey,
+        fileName: `${item.mediaKey}.${getFileExtension(item.type)}`,
+        contentType: getContentType(item.type)
+      }))
+    };
+  }
+
+  return result;
+}
+
+function mapTweetRecord(input: BundleBuilderInput): ArchivedTweetRecord {
+  const entities: TextEntities = {
+    urls: (input.entities?.urls ?? []).map((u) => ({
+      shortUrl: u.url,
+      expandedUrl: u.expanded_url,
+      displayUrl: u.display_url,
+      title: u.title
+    })),
+    mentions: (input.entities?.mentions ?? []).map((m) => ({
+      handle: m.username,
+      id: m.id
+    })),
+    hashtags: (input.entities?.hashtags ?? []).map((h) => ({
+      tag: h.tag
+    })),
+    cashtags: (input.entities?.cashtags ?? []).map((c) => ({
+      tag: c.tag
+    }))
+  };
+
+  return {
+    metadata: {
+      id: input.tweetId,
+      createdAt: input.createdAt,
+      conversationId: input.conversationId,
+      references: input.referencedTweets
+    },
+    author: {
+      id: input.authorId,
+      handle: input.authorHandle
+    },
+    content: {
+      text: input.text,
+      entities
+    },
+    media: input.media.map((m) => ({
+      mediaKey: m.mediaKey,
+      type: m.type,
+      url: m.url,
+      previewImageUrl: m.previewImageUrl,
+      width: m.width,
+      height: m.height,
+      durationMs: m.durationMs,
+      altText: m.altText
+    }))
+  };
+}
+
+function dedupeMedia(media: BundleBuilderInput['media']) {
+  const dedupedMedia = new Map<string, BundleBuilderInput['media'][number]>();
+
+  for (const item of media) {
+    dedupedMedia.set(item.mediaKey, item);
+  }
+
+  return [...dedupedMedia.values()];
 }
 
 function getFileExtension(type: string): string {
