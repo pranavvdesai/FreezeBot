@@ -1,9 +1,15 @@
 import express, { NextFunction, Request, Response } from 'express';
+import { findArchiveForRecover, getArchiveStatus } from 'indexer';
 import { verifyRequestSignature } from './signature';
 import { ParsedCommand, parseCommand } from './command-parser';
 import { postReply } from './post-reply';
 import { archiveSingleTweet } from './archive-single-tweet';
 import { archiveThread } from './archive-thread';
+import {
+  ArchiveFlowError,
+  invalidArchiveTargetError,
+  toArchiveUnknownError
+} from './archive-errors';
 
 type RawBodyRequest = Request & { rawBody?: Buffer };
 type Logger = Pick<Console, 'error'>;
@@ -18,6 +24,16 @@ type CreateAppOptions = {
     mentionTweetId: string;
     targetTweetId: string;
   }) => Promise<{ cid: string }>;
+  getArchiveStatusFn?: (tweetId: string) => Promise<{
+    cid: string;
+    status: string;
+  } | null>;
+  findArchiveForRecoverFn?: (params: {
+    tweetId?: string;
+    conversationId?: string;
+  }) => Promise<{
+    cid: string;
+  } | null>;
   logger?: Logger;
 };
 
@@ -29,8 +45,20 @@ function buildArchiveSuccessMessage(cid: string) {
   return `Archived successfully ✅\nCID: ${cid}`;
 }
 
-function buildArchiveFailureMessage() {
-  return "Sorry, I couldn't archive that tweet right now. Please try again.";
+function buildStatusMessage(result: { cid: string; status: string } | null) {
+  if (!result) {
+    return 'No archive found for this tweet yet.';
+  }
+
+  return `Archive status: ${result.status}\nCID: ${result.cid}`;
+}
+
+function buildRecoverMessage(result: { cid: string } | null) {
+  if (!result) {
+    return 'No archived copy was found for this tweet.';
+  }
+
+  return `Recovered archive\nCID: ${result.cid}`;
 }
 
 function readMentionTweetId(body: unknown) {
@@ -68,9 +96,9 @@ function readMentionTweetId(body: unknown) {
   return null;
 }
 
-function readTargetTweetId(body: unknown, fallbackTweetId: string | null) {
+function readTargetTweetId(body: unknown) {
   if (!body || typeof body !== 'object') {
-    return fallbackTweetId;
+    return null;
   }
 
   const payload = body as {
@@ -102,7 +130,36 @@ function readTargetTweetId(body: unknown, fallbackTweetId: string | null) {
     return repliedToTweet.id.trim();
   }
 
-  return fallbackTweetId;
+  return null;
+}
+
+function readConversationId(body: unknown, fallbackConversationId: string | null) {
+  if (!body || typeof body !== 'object') {
+    return fallbackConversationId;
+  }
+
+  const payload = body as {
+    conversationId?: unknown;
+    conversation_id?: unknown;
+  };
+
+  if (typeof payload.conversationId === 'string' && payload.conversationId.trim()) {
+    return payload.conversationId.trim();
+  }
+
+  if (typeof payload.conversation_id === 'string' && payload.conversation_id.trim()) {
+    return payload.conversation_id.trim();
+  }
+
+  return fallbackConversationId;
+}
+
+function getUserFacingArchiveErrorMessage(error: unknown) {
+  if (error instanceof ArchiveFlowError) {
+    return error.userMessage;
+  }
+
+  return toArchiveUnknownError(error).userMessage;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -110,6 +167,8 @@ export function createApp(options: CreateAppOptions = {}) {
   const postReplyFn = options.postReplyFn ?? postReply;
   const archiveSingleTweetFn = options.archiveSingleTweetFn ?? archiveSingleTweet;
   const archiveThreadFn = options.archiveThreadFn ?? archiveThread;
+  const getArchiveStatusFn = options.getArchiveStatusFn ?? getArchiveStatus;
+  const findArchiveForRecoverFn = options.findArchiveForRecoverFn ?? findArchiveForRecover;
   const logger = options.logger ?? console;
 
   app.use(
@@ -155,7 +214,8 @@ export function createApp(options: CreateAppOptions = {}) {
       res.status(400).json({ error: 'tweetId is required' });
       return;
     }
-    const targetTweetId = readTargetTweetId(req.body, mentionTweetId);
+    const targetTweetId = readTargetTweetId(req.body);
+    const conversationId = readConversationId(req.body, targetTweetId);
 
     const text = typeof req.body?.text === 'string' ? req.body.text : '';
     const command = parseCommand(text);
@@ -166,22 +226,35 @@ export function createApp(options: CreateAppOptions = {}) {
 
     if (command.command === 'archive' && command.mode === 'single') {
       try {
+        if (!targetTweetId) {
+          throw invalidArchiveTargetError();
+        }
+
         const archiveResult = await archiveSingleTweetFn({
           mentionTweetId,
-          targetTweetId: targetTweetId ?? mentionTweetId
+          targetTweetId
         });
         await postReplyFn(mentionTweetId, buildArchiveSuccessMessage(archiveResult.cid));
         res.json({ ok: true, command, cid: archiveResult.cid, repliedTo: mentionTweetId });
         return;
       } catch (error) {
+        const archiveError = toArchiveUnknownError(error, {
+          mentionTweetId,
+          targetTweetId,
+          mode: 'single'
+        });
         logger.error('Failed to archive tweet', {
-          error,
+          code: archiveError.code,
+          stage: archiveError.stage,
+          message: archiveError.message,
+          details: archiveError.details,
+          cause: archiveError.cause,
           mentionTweetId,
           targetTweetId
         });
 
         try {
-          await postReplyFn(mentionTweetId, buildArchiveFailureMessage());
+          await postReplyFn(mentionTweetId, getUserFacingArchiveErrorMessage(archiveError));
         } catch (replyError) {
           logger.error('Failed to post archive failure reply', {
             error: replyError,
@@ -199,22 +272,35 @@ export function createApp(options: CreateAppOptions = {}) {
 
     if (command.command === 'archive' && command.mode === 'thread') {
       try {
+        if (!targetTweetId) {
+          throw invalidArchiveTargetError();
+        }
+
         const archiveResult = await archiveThreadFn({
           mentionTweetId,
-          targetTweetId: targetTweetId ?? mentionTweetId
+          targetTweetId
         });
         await postReplyFn(mentionTweetId, buildArchiveSuccessMessage(archiveResult.cid));
         res.json({ ok: true, command, cid: archiveResult.cid, repliedTo: mentionTweetId });
         return;
       } catch (error) {
+        const archiveError = toArchiveUnknownError(error, {
+          mentionTweetId,
+          targetTweetId,
+          mode: 'thread'
+        });
         logger.error('Failed to archive thread', {
-          error,
+          code: archiveError.code,
+          stage: archiveError.stage,
+          message: archiveError.message,
+          details: archiveError.details,
+          cause: archiveError.cause,
           mentionTweetId,
           targetTweetId
         });
 
         try {
-          await postReplyFn(mentionTweetId, buildArchiveFailureMessage());
+          await postReplyFn(mentionTweetId, getUserFacingArchiveErrorMessage(archiveError));
         } catch (replyError) {
           logger.error('Failed to post thread archive failure reply', {
             error: replyError,
@@ -226,6 +312,44 @@ export function createApp(options: CreateAppOptions = {}) {
         }
 
         res.json({ ok: false, error: 'archive failed', repliedTo: mentionTweetId });
+        return;
+      }
+    }
+
+    if (command.command === 'status') {
+      try {
+        const statusResult = await getArchiveStatusFn(targetTweetId ?? mentionTweetId);
+        await postReplyFn(mentionTweetId, buildStatusMessage(statusResult));
+        res.json({ ok: true, command, repliedTo: mentionTweetId, status: statusResult });
+        return;
+      } catch (error) {
+        logger.error('Failed to lookup archive status', {
+          error,
+          mentionTweetId,
+          targetTweetId
+        });
+        res.status(500).json({ error: 'failed to lookup archive status' });
+        return;
+      }
+    }
+
+    if (command.command === 'recover') {
+      try {
+        const recoverResult = await findArchiveForRecoverFn({
+          tweetId: targetTweetId ?? mentionTweetId,
+          conversationId: conversationId ?? undefined
+        });
+        await postReplyFn(mentionTweetId, buildRecoverMessage(recoverResult));
+        res.json({ ok: true, command, repliedTo: mentionTweetId, archive: recoverResult });
+        return;
+      } catch (error) {
+        logger.error('Failed to lookup recover archive', {
+          error,
+          mentionTweetId,
+          targetTweetId,
+          conversationId
+        });
+        res.status(500).json({ error: 'failed to lookup archive for recovery' });
         return;
       }
     }
