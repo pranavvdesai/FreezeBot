@@ -2,6 +2,7 @@ import { buildSingleTweetBundle, type BundleBuilderInput, type TweetBundle } fro
 import { storeArchiveRecord } from 'indexer';
 import { uploadArchiveBundleToStoracha, type StorachaUploadResult } from 'storage-w3up';
 import { fetchTargetTweet, type NormalizedTweet } from 'x-client';
+import { toArchiveFetchError, toArchiveStoreError, toArchiveUploadError } from './archive-errors';
 
 type ArchiveSingleTweetInput = {
   mentionTweetId: string;
@@ -19,15 +20,16 @@ type ArchiveSingleTweetDependencies = {
   ) => TweetBundle;
   uploadArchiveBundleFn?: (bundle: Record<string, unknown>) => Promise<StorachaUploadResult>;
   storeArchiveRecordFn?: (record: {
-    targetTweetId: string;
+    tweetId: string;
+    conversationId: string;
     mentionTweetId: string;
     cid: string;
-    archivedAt: string;
-    platform: 'x';
-    command: 'archive';
+    status: 'archived';
+    createdAt: string;
+    updatedAt: string;
     mode: 'single';
     archiveMetadata: unknown;
-  }) => Promise<void>;
+  }) => Promise<unknown>;
   now?: () => string;
 };
 
@@ -48,23 +50,39 @@ export async function archiveSingleTweet(
     dependencies.uploadArchiveBundleFn ?? uploadArchiveBundleToStoracha;
   const storeArchiveRecordFn = dependencies.storeArchiveRecordFn ?? storeArchiveRecord;
 
-  const normalizedTweet = await fetchTargetTweetFn(input.targetTweetId);
+  let normalizedTweet: NormalizedTweet;
+  try {
+    normalizedTweet = await fetchTargetTweetFn(input.targetTweetId);
+  } catch (error) {
+    throw toArchiveFetchError(error, { targetTweetId: input.targetTweetId, mode: 'single' });
+  }
+
   const bundle = buildSingleTweetBundleFn(normalizedTweet, {
     archivedAt,
     rawSnapshot: normalizedTweet
   });
-  const uploadResult = await uploadArchiveBundleFn(bundle);
+  let uploadResult: StorachaUploadResult;
+  try {
+    uploadResult = await uploadArchiveBundleFn(bundle);
+  } catch (error) {
+    throw toArchiveUploadError(error, { targetTweetId: input.targetTweetId, mode: 'single' });
+  }
 
-  await storeArchiveRecordFn({
-    targetTweetId: input.targetTweetId,
-    mentionTweetId: input.mentionTweetId,
-    cid: uploadResult.cid,
-    archivedAt,
-    platform: 'x',
-    command: 'archive',
-    mode: 'single',
-    archiveMetadata: bundle['bundle.json']
-  });
+  try {
+    await storeArchiveRecordFn({
+      tweetId: input.targetTweetId,
+      conversationId: normalizedTweet.conversationId,
+      mentionTweetId: input.mentionTweetId,
+      cid: uploadResult.cid,
+      status: 'archived',
+      createdAt: archivedAt,
+      updatedAt: archivedAt,
+      mode: 'single',
+      archiveMetadata: bundle['bundle.json']
+    });
+  } catch (error) {
+    throw toArchiveStoreError(error, { targetTweetId: input.targetTweetId, mode: 'single' });
+  }
 
   return {
     cid: uploadResult.cid,
