@@ -1,5 +1,10 @@
 import express, { NextFunction, Request, Response } from 'express';
-import { findArchiveForRecover, getArchiveStatus } from 'indexer';
+import {
+  findArchiveForRecover,
+  getArchiveStatus,
+  isWebhookMentionProcessed,
+  recordWebhookMentionProcessed
+} from 'indexer';
 import { verifyRequestSignature } from './signature';
 import { ParsedCommand, parseCommand } from './command-parser';
 import { postReply } from './post-reply';
@@ -34,6 +39,8 @@ type CreateAppOptions = {
   }) => Promise<{
     cid: string;
   } | null>;
+  isWebhookMentionProcessedFn?: (mentionTweetId: string) => Promise<boolean>;
+  recordWebhookMentionProcessedFn?: (mentionTweetId: string) => Promise<void>;
   logger?: Logger;
 };
 
@@ -169,6 +176,10 @@ export function createApp(options: CreateAppOptions = {}) {
   const archiveThreadFn = options.archiveThreadFn ?? archiveThread;
   const getArchiveStatusFn = options.getArchiveStatusFn ?? getArchiveStatus;
   const findArchiveForRecoverFn = options.findArchiveForRecoverFn ?? findArchiveForRecover;
+  const isWebhookMentionProcessedFn =
+    options.isWebhookMentionProcessedFn ?? isWebhookMentionProcessed;
+  const recordWebhookMentionProcessedFn =
+    options.recordWebhookMentionProcessedFn ?? recordWebhookMentionProcessed;
   const logger = options.logger ?? console;
 
   app.use(
@@ -224,6 +235,16 @@ export function createApp(options: CreateAppOptions = {}) {
       return;
     }
 
+    if (await isWebhookMentionProcessedFn(mentionTweetId)) {
+      res.json({ ok: true, deduplicated: true, repliedTo: mentionTweetId });
+      return;
+    }
+
+    const respondProcessedJson = async (payload: Record<string, unknown>) => {
+      await recordWebhookMentionProcessedFn(mentionTweetId);
+      res.json(payload);
+    };
+
     if (command.command === 'archive' && command.mode === 'single') {
       try {
         if (!targetTweetId) {
@@ -235,7 +256,12 @@ export function createApp(options: CreateAppOptions = {}) {
           targetTweetId
         });
         await postReplyFn(mentionTweetId, buildArchiveSuccessMessage(archiveResult.cid));
-        res.json({ ok: true, command, cid: archiveResult.cid, repliedTo: mentionTweetId });
+        await respondProcessedJson({
+          ok: true,
+          command,
+          cid: archiveResult.cid,
+          repliedTo: mentionTweetId
+        });
         return;
       } catch (error) {
         const archiveError = toArchiveUnknownError(error, {
@@ -265,7 +291,11 @@ export function createApp(options: CreateAppOptions = {}) {
           return;
         }
 
-        res.json({ ok: false, error: 'archive failed', repliedTo: mentionTweetId });
+        await respondProcessedJson({
+          ok: false,
+          error: 'archive failed',
+          repliedTo: mentionTweetId
+        });
         return;
       }
     }
@@ -281,7 +311,12 @@ export function createApp(options: CreateAppOptions = {}) {
           targetTweetId
         });
         await postReplyFn(mentionTweetId, buildArchiveSuccessMessage(archiveResult.cid));
-        res.json({ ok: true, command, cid: archiveResult.cid, repliedTo: mentionTweetId });
+        await respondProcessedJson({
+          ok: true,
+          command,
+          cid: archiveResult.cid,
+          repliedTo: mentionTweetId
+        });
         return;
       } catch (error) {
         const archiveError = toArchiveUnknownError(error, {
@@ -311,7 +346,11 @@ export function createApp(options: CreateAppOptions = {}) {
           return;
         }
 
-        res.json({ ok: false, error: 'archive failed', repliedTo: mentionTweetId });
+        await respondProcessedJson({
+          ok: false,
+          error: 'archive failed',
+          repliedTo: mentionTweetId
+        });
         return;
       }
     }
@@ -320,7 +359,12 @@ export function createApp(options: CreateAppOptions = {}) {
       try {
         const statusResult = await getArchiveStatusFn(targetTweetId ?? mentionTweetId);
         await postReplyFn(mentionTweetId, buildStatusMessage(statusResult));
-        res.json({ ok: true, command, repliedTo: mentionTweetId, status: statusResult });
+        await respondProcessedJson({
+          ok: true,
+          command,
+          repliedTo: mentionTweetId,
+          status: statusResult
+        });
         return;
       } catch (error) {
         logger.error('Failed to lookup archive status', {
@@ -340,7 +384,12 @@ export function createApp(options: CreateAppOptions = {}) {
           conversationId: conversationId ?? undefined
         });
         await postReplyFn(mentionTweetId, buildRecoverMessage(recoverResult));
-        res.json({ ok: true, command, repliedTo: mentionTweetId, archive: recoverResult });
+        await respondProcessedJson({
+          ok: true,
+          command,
+          repliedTo: mentionTweetId,
+          archive: recoverResult
+        });
         return;
       } catch (error) {
         logger.error('Failed to lookup recover archive', {
@@ -367,7 +416,7 @@ export function createApp(options: CreateAppOptions = {}) {
       return;
     }
 
-    res.json({ ok: true, command, repliedTo: mentionTweetId });
+    await respondProcessedJson({ ok: true, command, repliedTo: mentionTweetId });
   });
 
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

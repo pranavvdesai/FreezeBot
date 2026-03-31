@@ -24,7 +24,8 @@ describe('archive indexer', () => {
     const appliedMigrations = await archiveStore.getAppliedMigrations();
 
     expect(appliedMigrations.map((migration) => migration.id)).toEqual([
-      '001_create_tweet_archives.sql'
+      '001_create_tweet_archives.sql',
+      '002_webhook_mention_idempotency.sql'
     ]);
 
     const stored = await archiveStore.storeArchiveRecord({
@@ -142,5 +143,13 @@ describe('archive indexer', () => {
       tweetId: 'tweet-latest',
       cid: 'bafylatest'
     });
+  });
+
+  it('tracks webhook mention idempotency', async () => {
+    await expect(archiveStore.isWebhookMentionProcessed('mention-a')).resolves.toBe(false);
+    await archiveStore.recordWebhookMentionProcessed('mention-a');
+    await expect(archiveStore.isWebhookMentionProcessed('mention-a')).resolves.toBe(true);
+    await archiveStore.recordWebhookMentionProcessed('mention-a');
+    await expect(archiveStore.isWebhookMentionProcessed('mention-a')).resolves.toBe(true);
   });
 });

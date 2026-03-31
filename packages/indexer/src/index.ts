@@ -44,6 +44,8 @@ export type ArchiveStore = {
   getArchiveRecord(tweetId: string): Promise<ArchiveRecord | null>;
   getArchiveStatus(tweetId: string): Promise<ArchiveStatusRecord | null>;
   findArchiveForRecover(params: RecoverLookupParams): Promise<ArchiveRecord | null>;
+  isWebhookMentionProcessed(mentionTweetId: string): Promise<boolean>;
+  recordWebhookMentionProcessed(mentionTweetId: string): Promise<void>;
   clearArchiveRecords(): Promise<void>;
   close(): Promise<void>;
 };
@@ -231,6 +233,45 @@ export async function createArchiveStore(
 
       return row ? mapArchiveRow(row) : null;
     },
+    async isWebhookMentionProcessed(mentionTweetId) {
+      const bind1 = getBindVariable(session.dialect, 1);
+      const row = await session.get<{ one: number }>(
+        `
+          SELECT 1 AS one
+          FROM webhook_mention_idempotency
+          WHERE mention_tweet_id = ${bind1}
+          LIMIT 1
+        `,
+        [mentionTweetId]
+      );
+      return Boolean(row);
+    },
+    async recordWebhookMentionProcessed(mentionTweetId) {
+      const now = new Date().toISOString();
+      if (session.dialect === 'postgres') {
+        const bind1 = getBindVariable(session.dialect, 1);
+        const bind2 = getBindVariable(session.dialect, 2);
+        await session.run(
+          `
+            INSERT INTO webhook_mention_idempotency (mention_tweet_id, processed_at)
+            VALUES (${bind1}, ${bind2})
+            ON CONFLICT (mention_tweet_id) DO NOTHING
+          `,
+          [mentionTweetId, now]
+        );
+        return;
+      }
+
+      const bind1 = getBindVariable(session.dialect, 1);
+      const bind2 = getBindVariable(session.dialect, 2);
+      await session.run(
+        `
+          INSERT OR IGNORE INTO webhook_mention_idempotency (mention_tweet_id, processed_at)
+          VALUES (${bind1}, ${bind2})
+        `,
+        [mentionTweetId, now]
+      );
+    },
     async clearArchiveRecords() {
       await session.run('DELETE FROM tweet_archives');
     },
@@ -260,6 +301,14 @@ export async function findArchiveForRecover(params: RecoverLookupParams) {
 
 export async function clearArchiveRecords() {
   return (await getDefaultStore()).clearArchiveRecords();
+}
+
+export async function isWebhookMentionProcessed(mentionTweetId: string) {
+  return (await getDefaultStore()).isWebhookMentionProcessed(mentionTweetId);
+}
+
+export async function recordWebhookMentionProcessed(mentionTweetId: string) {
+  return (await getDefaultStore()).recordWebhookMentionProcessed(mentionTweetId);
 }
 
 async function getDefaultStore() {
