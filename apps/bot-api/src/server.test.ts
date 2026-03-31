@@ -316,4 +316,34 @@ describe('webhook archive flow', () => {
       'Recovered archive\nCID: bafyrecovercid'
     );
   });
+
+  it('replies with help text for the help command', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const archiveSingleTweetFn = vi.fn();
+    const app = createApp({ postReplyFn, archiveSingleTweetFn });
+
+    const payload = {
+      mentionTweetId: 'mention-help',
+      text: '@Freeze help'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(archiveSingleTweetFn).not.toHaveBeenCalled();
+    expect(postReplyFn).toHaveBeenCalledTimes(1);
+    expect(postReplyFn.mock.calls[0][0]).toBe('mention-help');
+    expect(postReplyFn.mock.calls[0][1]).toContain('Freeze this');
+    expect(postReplyFn.mock.calls[0][1]).toContain('recover');
+    expect(response.body).toMatchObject({
+      ok: true,
+      command: { command: 'help', mode: 'single' },
+      repliedTo: 'mention-help'
+    });
+  });
 });
