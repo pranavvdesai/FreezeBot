@@ -71,6 +71,8 @@ describe('archive pipeline integration', () => {
     };
 
     const app = createApp({
+      isWebhookMentionProcessedFn: async () => false,
+      recordWebhookMentionProcessedFn: async () => {},
       postReplyFn,
       archiveSingleTweetFn
     });

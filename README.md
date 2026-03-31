@@ -351,8 +351,8 @@ pnpm dev
 
 **Duplicate archives**
 
-* Use `IdempotencyGuard`: `(tweetId, commandType)` as a unique key
-* Deduplicate by computed stable `bundleHash` before uploading
+* Webhook: `bot-api` records each **mention tweet id** in the index DB after a completed handler response, so platform retries for the same mention are ignored (see `webhook_mention_idempotency` migration).
+* Deduplicate by computed stable `bundleHash` before uploading when adding that optimization
 
 ---
 

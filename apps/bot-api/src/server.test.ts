@@ -11,12 +11,20 @@ function signedHeader(body: unknown) {
   return `sha256=${computeSignature(rawBody, secret)}`;
 }
 
+function testApp(options: Parameters<typeof createApp>[0]) {
+  return createApp({
+    isWebhookMentionProcessedFn: async () => false,
+    recordWebhookMentionProcessedFn: async () => {},
+    ...options
+  });
+}
+
 describe('webhook archive flow', () => {
   it('archives a single tweet and replies with the CID', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
     const archiveSingleTweetFn = vi.fn().mockResolvedValue({ cid: 'bafyarchivecid' });
-    const app = createApp({ postReplyFn, archiveSingleTweetFn });
+    const app = testApp({ postReplyFn, archiveSingleTweetFn });
 
     const payload = {
       mentionTweetId: 'mention-123',
@@ -46,7 +54,7 @@ describe('webhook archive flow', () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
     const archiveThreadFn = vi.fn().mockResolvedValue({ cid: 'bafythreadcid' });
-    const app = createApp({ postReplyFn, archiveThreadFn });
+    const app = testApp({ postReplyFn, archiveThreadFn });
 
     const payload = {
       mentionTweetId: 'mention-777',
@@ -76,7 +84,7 @@ describe('webhook archive flow', () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
     const archiveSingleTweetFn = vi.fn().mockResolvedValue({ cid: 'bafyarchivecid' });
-    const app = createApp({ postReplyFn, archiveSingleTweetFn });
+    const app = testApp({ postReplyFn, archiveSingleTweetFn });
 
     const payload = {
       mentionTweetId: 'mention-123',
@@ -106,7 +114,7 @@ describe('webhook archive flow', () => {
         message: 'Target tweet missing'
       })
     );
-    const app = createApp({ postReplyFn, archiveSingleTweetFn, logger });
+    const app = testApp({ postReplyFn, archiveSingleTweetFn, logger });
 
     const payload = {
       mentionTweetId: 'mention-555',
@@ -149,7 +157,7 @@ describe('webhook archive flow', () => {
         message: 'Upload failed'
       })
     );
-    const app = createApp({ postReplyFn, archiveSingleTweetFn, logger });
+    const app = testApp({ postReplyFn, archiveSingleTweetFn, logger });
 
     const payload = {
       mentionTweetId: 'mention-901',
@@ -192,7 +200,7 @@ describe('webhook archive flow', () => {
         message: 'DB write failed'
       })
     );
-    const app = createApp({ postReplyFn, archiveThreadFn, logger });
+    const app = testApp({ postReplyFn, archiveThreadFn, logger });
 
     const payload = {
       mentionTweetId: 'mention-902',
@@ -228,7 +236,7 @@ describe('webhook archive flow', () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const logger = { error: vi.fn() };
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
-    const app = createApp({ postReplyFn, logger });
+    const app = testApp({ postReplyFn, logger });
 
     const payload = {
       mentionTweetId: 'mention-404',
@@ -263,7 +271,7 @@ describe('webhook archive flow', () => {
       cid: 'bafystatuscid',
       status: 'archived'
     });
-    const app = createApp({ postReplyFn, getArchiveStatusFn });
+    const app = testApp({ postReplyFn, getArchiveStatusFn });
 
     const payload = {
       mentionTweetId: 'mention-123',
@@ -291,7 +299,7 @@ describe('webhook archive flow', () => {
     const findArchiveForRecoverFn = vi.fn().mockResolvedValue({
       cid: 'bafyrecovercid'
     });
-    const app = createApp({ postReplyFn, findArchiveForRecoverFn });
+    const app = testApp({ postReplyFn, findArchiveForRecoverFn });
 
     const payload = {
       mentionTweetId: 'mention-321',
@@ -315,5 +323,54 @@ describe('webhook archive flow', () => {
       'mention-321',
       'Recovered archive\nCID: bafyrecovercid'
     );
+  });
+
+  it('deduplicates webhook deliveries for the same mention tweet id', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+
+    let recorded = false;
+    const isWebhookMentionProcessedFn = vi.fn().mockImplementation(async () => recorded);
+    const recordWebhookMentionProcessedFn = vi.fn().mockImplementation(async () => {
+      recorded = true;
+    });
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const archiveSingleTweetFn = vi.fn().mockResolvedValue({ cid: 'bafyarchivecid' });
+
+    const app = createApp({
+      isWebhookMentionProcessedFn,
+      recordWebhookMentionProcessedFn,
+      postReplyFn,
+      archiveSingleTweetFn
+    });
+
+    const payload = {
+      mentionTweetId: 'mention-dedup',
+      targetTweetId: 'target-dedup',
+      text: '@Freeze this'
+    };
+
+    const first = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    const second = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(first.body.deduplicated).toBeUndefined();
+    expect(second.body).toMatchObject({
+      ok: true,
+      deduplicated: true,
+      repliedTo: 'mention-dedup'
+    });
+    expect(archiveSingleTweetFn).toHaveBeenCalledTimes(1);
+    expect(postReplyFn).toHaveBeenCalledTimes(1);
+    expect(recordWebhookMentionProcessedFn).toHaveBeenCalledTimes(1);
   });
 });
