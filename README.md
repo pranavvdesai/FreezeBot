@@ -311,12 +311,30 @@ pnpm dev
 
 ### Environment variables (example)
 
-* `X_APP_KEY=...`
-* `X_APP_SECRET=...`
-* `X_WEBHOOK_SECRET=...`
-* `DATABASE_URL=postgres://...`
-* `W3UP_EMAIL=...` (if using email-based auth flow)
-* `VIEWER_BASE_URL=http://localhost:3000`
+**Bot API (`apps/bot-api`)**
+
+* `X_WEBHOOK_SECRET` — **required** for `/webhook`; used to verify request signatures (`HMAC-SHA256` over the raw body).
+* `PORT` — HTTP port (default `3000`).
+
+**X API — tweet and thread fetch (`packages/x-client`)**
+
+* `X_BEARER_TOKEN` — **required** for archive flows that call X API v2 (`Authorization: Bearer …`). Create an app in the X developer portal and use a bearer token with access to the endpoints you need.
+
+**Archive index (`packages/indexer`)**
+
+* `DATABASE_URL` or `POSTGRES_URL` — optional; if set, the indexer uses Postgres (unless overridden).
+* `ARCHIVE_INDEX_DIALECT` — optional; `sqlite` or `postgres` to force a dialect.
+* `ARCHIVE_INDEX_DB_PATH` — optional; SQLite database file path (defaults to `.freezebot/archive-index.sqlite` under the process working directory).
+
+**Storage**
+
+* `STORACHA_EMAIL` — optional; used by `packages/storage-storacha` for real uploads when you wire that uploader in. The default `storage-w3up` dependency in `bot-api` is still a development stub that derives a CID locally without uploading.
+
+**Other**
+
+* `VIEWER_BASE_URL` — optional; use in production for viewer or reply links once those flows read it (not yet wired everywhere).
+
+OAuth `X_APP_KEY` / `X_APP_SECRET` (or user-context tokens) are **not** used by the current read path; they may become relevant when posting replies to X is implemented.
 
 ---
 
