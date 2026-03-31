@@ -1,5 +1,5 @@
 export type CommandMode = 'single' | 'thread';
-export type BotCommand = 'archive' | 'recover' | 'status';
+export type BotCommand = 'archive' | 'recover' | 'status' | 'help';
 
 export type ParsedCommand =
   | {
@@ -7,7 +7,7 @@ export type ParsedCommand =
       mode: CommandMode;
     }
   | {
-      command: 'recover' | 'status';
+      command: 'recover' | 'status' | 'help';
       mode: 'single';
     };
 
@@ -40,6 +40,10 @@ export function parseCommand(input: string): ParsedCommand | null {
 
   if (withoutHandle.startsWith('status')) {
     return { command: 'status', mode: 'single' };
+  }
+
+  if (withoutHandle.startsWith('help')) {
+    return { command: 'help', mode: 'single' };
   }
 
   return null;

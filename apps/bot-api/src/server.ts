@@ -61,6 +61,15 @@ function buildRecoverMessage(result: { cid: string } | null) {
   return `Recovered archive\nCID: ${result.cid}`;
 }
 
+const HELP_REPLY_MESSAGE = `FreezeBot archives posts to decentralized storage with a content ID (CID).
+
+Commands (reply or mention the bot):
+• @Freeze this — archive this post (thread context when available)
+• @Freeze this thread — capture the full thread
+• @Freeze status — see if it is archived and get the CID
+• @Freeze recover — get the archive when the original is gone
+• @Freeze help — show this message`;
+
 function readMentionTweetId(body: unknown) {
   if (!body || typeof body !== 'object') {
     return null;
@@ -350,6 +359,21 @@ export function createApp(options: CreateAppOptions = {}) {
           conversationId
         });
         res.status(500).json({ error: 'failed to lookup archive for recovery' });
+        return;
+      }
+    }
+
+    if (command.command === 'help') {
+      try {
+        await postReplyFn(mentionTweetId, HELP_REPLY_MESSAGE);
+        res.json({ ok: true, command, repliedTo: mentionTweetId });
+        return;
+      } catch (error) {
+        logger.error('Failed to post help reply', {
+          error,
+          mentionTweetId
+        });
+        res.status(500).json({ error: 'failed to post reply' });
         return;
       }
     }

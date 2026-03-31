@@ -23,6 +23,11 @@ describe('parseCommand', () => {
     expect(parseCommand('@Freeze status')).toEqual({ command: 'status', mode: 'single' });
   });
 
+  it('parses help', () => {
+    expect(parseCommand('@Freeze help')).toEqual({ command: 'help', mode: 'single' });
+    expect(parseCommand('@freezebot help me')).toEqual({ command: 'help', mode: 'single' });
+  });
+
   it('returns null for unsupported text', () => {
     expect(parseCommand('hello there')).toBeNull();
     expect(parseCommand('@Freeze unknown')).toBeNull();
