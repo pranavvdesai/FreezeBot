@@ -143,4 +143,56 @@ describe('archive indexer', () => {
       cid: 'bafylatest'
     });
   });
+
+  it('does not expose failed archives for status, recover, or getArchiveRecord', async () => {
+    const storedFailed = await archiveStore.storeArchiveRecord({
+      tweetId: 'tweet-failed',
+      conversationId: 'conversation-fail',
+      cid: 'bafybroken',
+      status: 'failed',
+      createdAt: '2026-03-30T10:00:00.000Z',
+      updatedAt: '2026-03-30T10:00:00.000Z',
+      mode: 'single'
+    });
+
+    expect(storedFailed.status).toBe('failed');
+
+    await expect(archiveStore.getArchiveRecord('tweet-failed')).resolves.toBeNull();
+    await expect(archiveStore.getArchiveStatus('tweet-failed')).resolves.toBeNull();
+    await expect(
+      archiveStore.findArchiveForRecover({ tweetId: 'tweet-failed' })
+    ).resolves.toBeNull();
+    await expect(
+      archiveStore.findArchiveForRecover({ conversationId: 'conversation-fail' })
+    ).resolves.toBeNull();
+  });
+
+  it('recover by conversation ignores failed rows and returns the latest archived row', async () => {
+    await archiveStore.storeArchiveRecord({
+      tweetId: 'tweet-fail-only',
+      conversationId: 'conversation-mix',
+      cid: 'bafyfail',
+      status: 'failed',
+      createdAt: '2026-03-30T09:00:00.000Z',
+      updatedAt: '2026-03-30T09:00:00.000Z',
+      mode: 'single'
+    });
+
+    await archiveStore.storeArchiveRecord({
+      tweetId: 'tweet-ok',
+      conversationId: 'conversation-mix',
+      cid: 'bafygood',
+      status: 'archived',
+      createdAt: '2026-03-30T09:10:00.000Z',
+      updatedAt: '2026-03-30T11:00:00.000Z',
+      mode: 'single'
+    });
+
+    await expect(
+      archiveStore.findArchiveForRecover({ conversationId: 'conversation-mix' })
+    ).resolves.toMatchObject({
+      tweetId: 'tweet-ok',
+      cid: 'bafygood'
+    });
+  });
 });

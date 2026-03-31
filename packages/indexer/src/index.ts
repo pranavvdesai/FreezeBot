@@ -74,6 +74,29 @@ export async function createArchiveStore(
 
   await ensureMigrations();
 
+  async function fetchArchiveRowByTweetId(tweetId: string): Promise<ArchiveRecord | null> {
+    const bind1 = getBindVariable(session.dialect, 1);
+    const row = await session.get<ArchiveRow>(
+      `
+        SELECT
+          tweet_id,
+          conversation_id,
+          cid,
+          status,
+          created_at,
+          updated_at,
+          mention_tweet_id,
+          mode,
+          archive_metadata
+        FROM tweet_archives
+        WHERE tweet_id = ${bind1}
+      `,
+      [tweetId]
+    );
+
+    return row ? mapArchiveRow(row) : null;
+  }
+
   const store: ArchiveStore = {
     ensureMigrations,
     async getAppliedMigrations() {
@@ -132,7 +155,7 @@ export async function createArchiveStore(
         ]
       );
 
-      const storedRecord = await store.getArchiveRecord(record.tweetId);
+      const storedRecord = await fetchArchiveRowByTweetId(record.tweetId);
       if (!storedRecord) {
         throw new Error('Failed to store archive record');
       }
@@ -155,6 +178,7 @@ export async function createArchiveStore(
             archive_metadata
           FROM tweet_archives
           WHERE tweet_id = ${bind1}
+            AND status = 'archived'
         `,
         [tweetId]
       );
@@ -177,6 +201,7 @@ export async function createArchiveStore(
             archive_metadata
           FROM tweet_archives
           WHERE tweet_id = ${bind1}
+            AND status = 'archived'
         `,
         [tweetId]
       );
@@ -223,6 +248,7 @@ export async function createArchiveStore(
             archive_metadata
           FROM tweet_archives
           WHERE conversation_id = ${bind1}
+            AND status = 'archived'
           ORDER BY updated_at DESC
           LIMIT 1
         `,
