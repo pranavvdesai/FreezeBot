@@ -1,5 +1,5 @@
 import express, { NextFunction, Request, Response } from 'express';
-import { findArchiveForRecover, getArchiveStatus } from 'indexer';
+import { findArchiveForRecover, getArchiveStatus, type ArchiveMode } from 'indexer';
 import { verifyRequestSignature } from './signature';
 import { ParsedCommand, parseCommand } from './command-parser';
 import { postReply } from './post-reply';
@@ -27,6 +27,9 @@ type CreateAppOptions = {
   getArchiveStatusFn?: (tweetId: string) => Promise<{
     cid: string;
     status: string;
+    createdAt?: string;
+    updatedAt?: string;
+    mode?: ArchiveMode;
   } | null>;
   findArchiveForRecoverFn?: (params: {
     tweetId?: string;
@@ -43,6 +46,29 @@ function buildReplyMessage(command: ParsedCommand) {
 
 function buildArchiveSuccessMessage(cid: string) {
   return `Archived successfully ✅\nCID: ${cid}`;
+}
+
+/** Stored archive satisfies this request without re-fetching / re-uploading. */
+function existingArchiveCoversRequest(
+  requestedMode: 'single' | 'thread',
+  storedMode: ArchiveMode | undefined
+): boolean {
+  if (requestedMode === 'thread') {
+    return storedMode === 'thread';
+  }
+  return storedMode === 'thread' || storedMode === 'single' || storedMode === undefined;
+}
+
+function buildExistingArchiveMessage(record: {
+  cid: string;
+  createdAt?: string;
+  updatedAt?: string;
+}) {
+  const ts = record.createdAt ?? record.updatedAt;
+  if (ts) {
+    return `Already archived ✅\nFirst captured: ${ts}\nCID: ${record.cid}`;
+  }
+  return `Already archived ✅\nCID: ${record.cid}`;
 }
 
 function buildStatusMessage(result: { cid: string; status: string } | null) {
@@ -230,6 +256,23 @@ export function createApp(options: CreateAppOptions = {}) {
           throw invalidArchiveTargetError();
         }
 
+        const existing = await getArchiveStatusFn(targetTweetId);
+        if (
+          existing &&
+          existing.status === 'archived' &&
+          existingArchiveCoversRequest('single', existing.mode)
+        ) {
+          await postReplyFn(mentionTweetId, buildExistingArchiveMessage(existing));
+          res.json({
+            ok: true,
+            command,
+            cid: existing.cid,
+            duplicate: true,
+            repliedTo: mentionTweetId
+          });
+          return;
+        }
+
         const archiveResult = await archiveSingleTweetFn({
           mentionTweetId,
           targetTweetId
@@ -274,6 +317,23 @@ export function createApp(options: CreateAppOptions = {}) {
       try {
         if (!targetTweetId) {
           throw invalidArchiveTargetError();
+        }
+
+        const existing = await getArchiveStatusFn(targetTweetId);
+        if (
+          existing &&
+          existing.status === 'archived' &&
+          existingArchiveCoversRequest('thread', existing.mode)
+        ) {
+          await postReplyFn(mentionTweetId, buildExistingArchiveMessage(existing));
+          res.json({
+            ok: true,
+            command,
+            cid: existing.cid,
+            duplicate: true,
+            repliedTo: mentionTweetId
+          });
+          return;
         }
 
         const archiveResult = await archiveThreadFn({

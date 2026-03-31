@@ -45,6 +45,7 @@ describe('archive pipeline integration', () => {
       tweetId: 'tweet-100'
     });
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue(null);
 
     const archiveSingleTweetFn = async ({
       mentionTweetId,
@@ -72,7 +73,8 @@ describe('archive pipeline integration', () => {
 
     const app = createApp({
       postReplyFn,
-      archiveSingleTweetFn
+      archiveSingleTweetFn,
+      getArchiveStatusFn
     });
 
     const payload = {
@@ -88,6 +90,7 @@ describe('archive pipeline integration', () => {
       .send(payload);
 
     expect(response.status).toBe(200);
+    expect(getArchiveStatusFn).toHaveBeenCalledWith('tweet-100');
     expect(fetchTargetTweetFn).toHaveBeenCalledWith('tweet-100');
     expect(buildSingleTweetBundleFn).toHaveBeenCalledWith(
       expect.objectContaining({

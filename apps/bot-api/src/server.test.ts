@@ -15,8 +15,9 @@ describe('webhook archive flow', () => {
   it('archives a single tweet and replies with the CID', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue(null);
     const archiveSingleTweetFn = vi.fn().mockResolvedValue({ cid: 'bafyarchivecid' });
-    const app = createApp({ postReplyFn, archiveSingleTweetFn });
+    const app = createApp({ postReplyFn, archiveSingleTweetFn, getArchiveStatusFn });
 
     const payload = {
       mentionTweetId: 'mention-123',
@@ -31,6 +32,7 @@ describe('webhook archive flow', () => {
       .send(payload);
 
     expect(response.status).toBe(200);
+    expect(getArchiveStatusFn).toHaveBeenCalledWith('target-456');
     expect(archiveSingleTweetFn).toHaveBeenCalledWith({
       mentionTweetId: 'mention-123',
       targetTweetId: 'target-456'
@@ -45,8 +47,9 @@ describe('webhook archive flow', () => {
   it('archives a thread and replies with the CID', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue(null);
     const archiveThreadFn = vi.fn().mockResolvedValue({ cid: 'bafythreadcid' });
-    const app = createApp({ postReplyFn, archiveThreadFn });
+    const app = createApp({ postReplyFn, archiveThreadFn, getArchiveStatusFn });
 
     const payload = {
       mentionTweetId: 'mention-777',
@@ -61,6 +64,7 @@ describe('webhook archive flow', () => {
       .send(payload);
 
     expect(response.status).toBe(200);
+    expect(getArchiveStatusFn).toHaveBeenCalledWith('target-888');
     expect(archiveThreadFn).toHaveBeenCalledWith({
       mentionTweetId: 'mention-777',
       targetTweetId: 'target-888'
@@ -75,8 +79,9 @@ describe('webhook archive flow', () => {
   it('returns 401 for invalid signature', async () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue(null);
     const archiveSingleTweetFn = vi.fn().mockResolvedValue({ cid: 'bafyarchivecid' });
-    const app = createApp({ postReplyFn, archiveSingleTweetFn });
+    const app = createApp({ postReplyFn, archiveSingleTweetFn, getArchiveStatusFn });
 
     const payload = {
       mentionTweetId: 'mention-123',
@@ -99,6 +104,7 @@ describe('webhook archive flow', () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const logger = { error: vi.fn() };
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue(null);
     const archiveSingleTweetFn = vi.fn().mockRejectedValue(
       new ArchiveFlowError({
         code: 'tweet_not_found',
@@ -106,7 +112,7 @@ describe('webhook archive flow', () => {
         message: 'Target tweet missing'
       })
     );
-    const app = createApp({ postReplyFn, archiveSingleTweetFn, logger });
+    const app = createApp({ postReplyFn, archiveSingleTweetFn, getArchiveStatusFn, logger });
 
     const payload = {
       mentionTweetId: 'mention-555',
@@ -142,6 +148,7 @@ describe('webhook archive flow', () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const logger = { error: vi.fn() };
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue(null);
     const archiveSingleTweetFn = vi.fn().mockRejectedValue(
       new ArchiveFlowError({
         code: 'upload_failed',
@@ -149,7 +156,7 @@ describe('webhook archive flow', () => {
         message: 'Upload failed'
       })
     );
-    const app = createApp({ postReplyFn, archiveSingleTweetFn, logger });
+    const app = createApp({ postReplyFn, archiveSingleTweetFn, getArchiveStatusFn, logger });
 
     const payload = {
       mentionTweetId: 'mention-901',
@@ -185,6 +192,7 @@ describe('webhook archive flow', () => {
     process.env.X_WEBHOOK_SECRET = secret;
     const logger = { error: vi.fn() };
     const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue(null);
     const archiveThreadFn = vi.fn().mockRejectedValue(
       new ArchiveFlowError({
         code: 'db_write_failed',
@@ -192,7 +200,7 @@ describe('webhook archive flow', () => {
         message: 'DB write failed'
       })
     );
-    const app = createApp({ postReplyFn, archiveThreadFn, logger });
+    const app = createApp({ postReplyFn, archiveThreadFn, getArchiveStatusFn, logger });
 
     const payload = {
       mentionTweetId: 'mention-902',
@@ -315,5 +323,141 @@ describe('webhook archive flow', () => {
       'mention-321',
       'Recovered archive\nCID: bafyrecovercid'
     );
+  });
+
+  it('short-circuits single-tweet archive when the target is already archived (same mode)', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue({
+      cid: 'bafyexisting',
+      status: 'archived',
+      createdAt: '2026-03-30T12:00:00.000Z',
+      mode: 'single' as const
+    });
+    const archiveSingleTweetFn = vi.fn();
+    const app = createApp({ postReplyFn, archiveSingleTweetFn, getArchiveStatusFn });
+
+    const payload = {
+      mentionTweetId: 'mention-dup',
+      targetTweetId: 'target-dup',
+      text: '@Freeze this'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(archiveSingleTweetFn).not.toHaveBeenCalled();
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-dup',
+      'Already archived ✅\nFirst captured: 2026-03-30T12:00:00.000Z\nCID: bafyexisting'
+    );
+    expect(response.body).toMatchObject({
+      ok: true,
+      cid: 'bafyexisting',
+      duplicate: true,
+      repliedTo: 'mention-dup'
+    });
+  });
+
+  it('short-circuits single-tweet archive when a thread archive already exists', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue({
+      cid: 'bafythread',
+      status: 'archived',
+      createdAt: '2026-03-30T11:00:00.000Z',
+      mode: 'thread' as const
+    });
+    const archiveSingleTweetFn = vi.fn();
+    const app = createApp({ postReplyFn, archiveSingleTweetFn, getArchiveStatusFn });
+
+    const payload = {
+      mentionTweetId: 'mention-dup2',
+      targetTweetId: 'target-dup2',
+      text: '@Freeze this'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(archiveSingleTweetFn).not.toHaveBeenCalled();
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-dup2',
+      'Already archived ✅\nFirst captured: 2026-03-30T11:00:00.000Z\nCID: bafythread'
+    );
+  });
+
+  it('short-circuits thread archive when a thread archive already exists', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue({
+      cid: 'bafythread2',
+      status: 'archived',
+      createdAt: '2026-03-29T10:00:00.000Z',
+      mode: 'thread' as const
+    });
+    const archiveThreadFn = vi.fn();
+    const app = createApp({ postReplyFn, archiveThreadFn, getArchiveStatusFn });
+
+    const payload = {
+      mentionTweetId: 'mention-dup3',
+      targetTweetId: 'target-dup3',
+      text: '@Freeze this thread'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(archiveThreadFn).not.toHaveBeenCalled();
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-dup3',
+      'Already archived ✅\nFirst captured: 2026-03-29T10:00:00.000Z\nCID: bafythread2'
+    );
+    expect(response.body.duplicate).toBe(true);
+  });
+
+  it('runs thread archive when only a single-tweet archive exists', async () => {
+    process.env.X_WEBHOOK_SECRET = secret;
+    const postReplyFn = vi.fn().mockResolvedValue(undefined);
+    const getArchiveStatusFn = vi.fn().mockResolvedValue({
+      cid: 'bafysingleonly',
+      status: 'archived',
+      createdAt: '2026-03-28T09:00:00.000Z',
+      mode: 'single' as const
+    });
+    const archiveThreadFn = vi.fn().mockResolvedValue({ cid: 'bafynewthread' });
+    const app = createApp({ postReplyFn, archiveThreadFn, getArchiveStatusFn });
+
+    const payload = {
+      mentionTweetId: 'mention-upgrade',
+      targetTweetId: 'target-upgrade',
+      text: '@Freeze this thread'
+    };
+
+    const response = await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-twitter-webhooks-signature', signedHeader(payload))
+      .send(payload);
+
+    expect(response.status).toBe(200);
+    expect(archiveThreadFn).toHaveBeenCalled();
+    expect(postReplyFn).toHaveBeenCalledWith(
+      'mention-upgrade',
+      'Archived successfully ✅\nCID: bafynewthread'
+    );
+    expect(response.body.duplicate).toBeUndefined();
   });
 });
